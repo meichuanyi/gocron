@@ -9,7 +9,6 @@ on:
 permissions:
   contents: write
   actions: write
-  workflows: write
 
 jobs:
   sync:
@@ -28,6 +27,8 @@ jobs:
       - name: Fetch upstream
         run: git fetch upstream master
 
+      # GITHUB_TOKEN 没有 workflows 权限，不能推送包含 .github/workflows 改动的提交；
+      # 因此合并上游后，workflow 文件一律保留本仓库自己的版本，避免 push 被拒。
       - name: Merge upstream changes
         id: merge
         run: |
@@ -38,7 +39,10 @@ jobs:
             echo "Already up to date."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
-            git merge upstream/master --no-edit
+            git merge upstream/master --no-commit --no-edit || true
+            # 丢弃上游对 workflow 文件的改动（GITHUB_TOKEN 推不了这类提交）
+            git checkout HEAD -- .github/workflows/
+            git commit --no-edit
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
