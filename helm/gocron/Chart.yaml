@@ -1,9 +1,10 @@
 apiVersion: v2
 name: gocron
-description: A Helm chart for gocron - cron job management system
+description: Horizontally scalable gocron deployment with database-backed leader election
 type: application
-version: 0.1.1
-appVersion: "1.5.9"
+kubeVersion: '>=1.23.0-0'
+version: 0.2.2
+appVersion: '1.11.1'
 keywords:
   - cron
   - scheduler

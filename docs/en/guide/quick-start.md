@@ -10,25 +10,26 @@ This guide will help you quickly deploy and run gocron.
 
 ## Database Support
 
-| Deployment Method | MySQL | PostgreSQL | SQLite |
-|-------------------|-------|------------|--------|
-| Docker Deployment | ✅ Supported | ✅ Supported | ✅ Supported |
-| Kubernetes Deployment | ✅ Supported | ✅ Supported | ✅ Supported |
-| Binary Deployment | ✅ Supported | ✅ Supported | ✅ Supported |
-| Development Environment | ✅ Supported | ✅ Supported | ✅ Supported |
+| Deployment Method       | MySQL        | PostgreSQL   | SQLite           |
+| ----------------------- | ------------ | ------------ | ---------------- |
+| Docker Deployment       | ✅ Supported | ✅ Supported | ✅ Supported     |
+| Kubernetes Deployment   | ✅ Supported | ✅ Supported | ❌ Not supported |
+| Binary Deployment       | ✅ Supported | ✅ Supported | ✅ Supported     |
+| Development Environment | ✅ Supported | ✅ Supported | ✅ Supported     |
 
 ::: tip Note
-- All deployment methods support all three databases. gocron uses a pure Go SQLite driver, no CGO required.
+
+- The managed Kubernetes Chart requires MySQL or PostgreSQL so every Pod can remain stateless and horizontally scalable. Other deployment methods retain pure-Go SQLite support.
 - **Production Recommendation**: Use MySQL or PostgreSQL for better performance and distributed deployment support
-:::
+  :::
 
 ## Choosing a Deployment Method
 
-| Scenario | Recommended |
-|----------|-------------|
+| Scenario                          | Recommended            |
+| --------------------------------- | ---------------------- |
 | Production, single / few machines | **Binary** (preferred) |
-| Production, Kubernetes cluster | Helm Chart |
-| Local evaluation, testing | Docker Compose |
+| Production, Kubernetes cluster    | Helm Chart             |
+| Local evaluation, testing         | Docker Compose         |
 
 gocron compiles into a single, dependency-free static binary (pure Go SQLite, no CGO), so binary deployment is the lightest and best-fitting option for single-machine production.
 
@@ -41,6 +42,7 @@ Suitable for production environments, supports all databases (including SQLite).
 Visit [GitHub Releases](https://github.com/gocronx-team/gocron/releases) to download the latest version.
 
 Choose the package for your platform:
+
 - Linux: `gocron-linux-amd64.tar.gz` or `gocron-linux-arm64.tar.gz`
 - macOS: `gocron-darwin-amd64.tar.gz` or `gocron-darwin-arm64.tar.gz`
 - Windows: `gocron-windows-amd64.zip` or `gocron-windows-arm64.zip`
@@ -136,19 +138,20 @@ docker compose up -d
 - Password: `admin123`
 
 ::: tip Tip
+
 - Docker Compose only deploys the gocron management server
 - Task nodes (gocron-node) need to be installed separately
 - See [Agent Auto-Registration](./agent-registration) for installing task nodes
-:::
+  :::
 
 ## Kubernetes Deployment (Helm)
 
 Deploy to Kubernetes clusters with a single command using Helm Chart.
 
-::: warning Image version note
-The Helm Chart defaults to the Docker Hub image `gocronx/gocron`, with the tag defaulting to the Chart's appVersion.
-Image publishing may currently lag behind GitHub Releases, so verify the target tag exists before installing —
-set it explicitly with `--set image.tag=<existing-tag>` if needed, or build and push your own image.
+::: tip Container image
+The Helm Chart defaults to the public image `ghcr.io/gocronx-team/gocron`, with
+the tag defaulting to the Chart's appVersion. Release tags publish matching
+multi-architecture images for Linux AMD64 and ARM64.
 :::
 
 ### Add Helm Repository
@@ -161,32 +164,35 @@ helm repo update
 ### Deploy
 
 ```bash
-# SQLite (default, simplest)
-helm install gocron gocron/gocron
-
-# MySQL
-helm install gocron gocron/gocron \
+# MySQL (the database must already exist)
+helm upgrade gocron gocron/gocron --reuse-values \
   --set db.engine=mysql \
   --set db.host=mysql.default \
   --set db.port=3306 \
   --set db.user=gocron \
   --set db.password=your_password \
-  --set db.database=gocron
+  --set db.database=gocron \
+  --set managed.authSecret=replace-with-at-least-32-random-characters \
+  --set managed.encryptionKey=replace-with-another-32-random-characters \
+  --set managed.admin.password=replace-with-a-strong-admin-password
 
-# PostgreSQL
+# PostgreSQL (the database must already exist)
 helm install gocron gocron/gocron \
   --set db.engine=postgres \
   --set db.host=pg.default \
   --set db.port=5432 \
   --set db.user=gocron \
   --set db.password=your_password \
-  --set db.database=gocron
+  --set db.database=gocron \
+  --set managed.authSecret=replace-with-at-least-32-random-characters \
+  --set managed.encryptionKey=replace-with-another-32-random-characters \
+  --set managed.admin.password=replace-with-a-strong-admin-password
 ```
 
 ### Configure Ingress
 
 ```bash
-helm install gocron gocron/gocron \
+helm upgrade gocron gocron/gocron --reuse-values \
   --set ingress.enabled=true \
   --set 'ingress.hosts[0].host=gocron.example.com' \
   --set 'ingress.hosts[0].paths[0].path=/' \

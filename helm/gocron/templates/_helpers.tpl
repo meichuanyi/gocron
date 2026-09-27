@@ -63,3 +63,36 @@ Image tag
 {{- define "gocron.imageTag" -}}
 {{- .Values.image.tag | default .Chart.AppVersion }}
 {{- end }}
+
+{{/* Validate requirements for the managed Kubernetes deployment. */}}
+{{- define "gocron.validateValues" -}}
+{{- if not (has .Values.db.engine (list "mysql" "postgres")) -}}
+{{- fail "db.engine must be mysql or postgres; SQLite is not supported by the Kubernetes chart" -}}
+{{- end -}}
+{{- if not .Values.db.host -}}
+{{- fail "db.host is required" -}}
+{{- end -}}
+{{- if not .Values.managed.existingSecret -}}
+{{- if not .Values.db.password -}}
+{{- fail "db.password or managed.existingSecret is required" -}}
+{{- end -}}
+{{- if lt (len .Values.managed.authSecret) 32 -}}
+{{- fail "managed.authSecret must contain at least 32 characters when managed.existingSecret is empty" -}}
+{{- end -}}
+{{- if lt (len .Values.managed.encryptionKey) 32 -}}
+{{- fail "managed.encryptionKey must contain at least 32 characters when managed.existingSecret is empty" -}}
+{{- end -}}
+{{- if lt (len .Values.managed.admin.password) 6 -}}
+{{- fail "managed.admin.password must contain at least 6 characters when managed.existingSecret is empty" -}}
+{{- end -}}
+{{- end -}}
+{{- if lt (int .Values.replicaCount) 1 -}}
+{{- fail "replicaCount must be at least 1" -}}
+{{- end -}}
+{{- if lt (int .Values.db.maxOpenConns) 2 -}}
+{{- fail "db.maxOpenConns must be at least 2 for managed bootstrap locking" -}}
+{{- end -}}
+{{- if and .Values.autoscaling.enabled (gt (int .Values.autoscaling.minReplicas) (int .Values.autoscaling.maxReplicas)) -}}
+{{- fail "autoscaling.minReplicas cannot exceed autoscaling.maxReplicas" -}}
+{{- end -}}
+{{- end }}
