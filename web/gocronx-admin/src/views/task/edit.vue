@@ -202,6 +202,10 @@
                     <ElIcon><WarningFilled /></ElIcon>
                     <span>{{ previewError }}</span>
                   </div>
+                  <div v-else-if="previewStartup" class="preview-state muted">
+                    <ElIcon><Clock /></ElIcon>
+                    <span>{{ t('template.previewStartup') }}</span>
+                  </div>
                   <div v-else-if="nextRuns.length === 0" class="preview-state muted">
                     <ElIcon><InfoFilled /></ElIcon>
                     <span>{{ t('template.previewNoRuns') }}</span>
@@ -529,6 +533,36 @@
               </ElFormItem>
             </ElCol>
           </ElRow>
+          <ElRow v-if="(form.notify_status & 4) !== 0">
+            <ElCol :span="24">
+              <ElFormItem :label="t('task.notifyKeywordLineMode')">
+                <ElSwitch
+                  v-model="form.notify_keyword_line_mode"
+                  :active-value="1"
+                  :inactive-value="0"
+                />
+                <span class="regex-hint">{{ t('task.notifyKeywordLineModeHint') }}</span>
+              </ElFormItem>
+            </ElCol>
+          </ElRow>
+          <ElRow v-if="form.notify_status > 0" :gutter="24">
+            <ElCol :span="12"
+              ><ElFormItem :label="t('task.notifySuccessText')">
+                <ElInput
+                  v-model.trim="form.notify_success_text"
+                  maxlength="128"
+                  :placeholder="t('task.notifySuccessTextPlaceholder')"
+                /> </ElFormItem
+            ></ElCol>
+            <ElCol :span="12"
+              ><ElFormItem :label="t('task.notifyFailureText')">
+                <ElInput
+                  v-model.trim="form.notify_failure_text"
+                  maxlength="128"
+                  :placeholder="t('task.notifyFailureTextPlaceholder')"
+                /> </ElFormItem
+            ></ElCol>
+          </ElRow>
           <ElRow>
             <ElCol :span="24">
               <ElFormItem :label="t('task.notifyDiagnosis')">
@@ -728,6 +762,9 @@
     notify_keyword: '',
     notify_keyword_regex: 0,
     notify_keyword_exclude: '',
+    notify_keyword_line_mode: 0,
+    notify_success_text: '',
+    notify_failure_text: '',
     notify_diagnosis: 0,
     notify_receiver_id: ''
   })
@@ -782,6 +819,7 @@
   const nextRuns = ref<CronRun[]>([])
   const previewError = ref('')
   const previewTz = ref('')
+  const previewStartup = ref(false)
   let cronDebounce: ReturnType<typeof setTimeout> | null = null
 
   // ── Computed ──────────────────────────────────────────────────────────────────
@@ -955,6 +993,9 @@
     form.notify_keyword = data.notify_keyword || ''
     form.notify_keyword_regex = data.notify_keyword_regex ?? 0
     form.notify_keyword_exclude = data.notify_keyword_exclude || ''
+    form.notify_keyword_line_mode = data.notify_keyword_line_mode ?? 0
+    form.notify_success_text = data.notify_success_text ?? ''
+    form.notify_failure_text = data.notify_failure_text ?? ''
     form.notify_diagnosis = data.notify_diagnosis ?? 0
     form.notify_receiver_id = data.notify_receiver_id || ''
 
@@ -1024,6 +1065,7 @@
       nextRuns.value = []
       previewError.value = ''
       previewTz.value = ''
+      previewStartup.value = false
       return
     }
     try {
@@ -1031,14 +1073,17 @@
       if (!res || res.valid === false) {
         previewError.value = res?.error || t('template.previewInvalid')
         nextRuns.value = []
+        previewStartup.value = false
         return
       }
       previewError.value = ''
       previewTz.value = res.timezone || ''
+      previewStartup.value = res.startup === true
       nextRuns.value = Array.isArray(res.next_runs) ? res.next_runs : []
     } catch {
       previewError.value = t('template.previewInvalid')
       nextRuns.value = []
+      previewStartup.value = false
     }
   }
 
@@ -1266,6 +1311,9 @@
         notify_keyword: form.notify_keyword,
         notify_keyword_regex: form.notify_keyword_regex,
         notify_keyword_exclude: form.notify_keyword_exclude,
+        notify_keyword_line_mode: form.notify_keyword_line_mode,
+        notify_success_text: form.notify_success_text,
+        notify_failure_text: form.notify_failure_text,
         notify_receiver_id: notifyReceiverIds,
         remark: form.remark
       })
@@ -1364,6 +1412,9 @@
         notify_keyword: '',
         notify_keyword_regex: 0,
         notify_keyword_exclude: '',
+        notify_keyword_line_mode: 0,
+        notify_success_text: '',
+        notify_failure_text: '',
         notify_receiver_id: ''
       })
       notifyConditions.value = []

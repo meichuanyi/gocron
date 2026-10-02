@@ -28,6 +28,7 @@ import (
 	rpcClient "github.com/gocronx-team/gocron/internal/modules/rpc/client"
 	pb "github.com/gocronx-team/gocron/internal/modules/rpc/proto"
 	"github.com/gocronx-team/gocron/internal/modules/utils"
+	"gorm.io/gorm"
 )
 
 var (
@@ -305,6 +306,12 @@ func (task Task) Add(taskModel models.Task) {
 		logger.Error("Failed to create task job#Unsupported task protocol#", taskModel.Protocol)
 		return
 	}
+	// In HA mode an API request may be handled by a follower while the
+	// scheduler is running on another node. The follower updates the shared
+	// database, but cannot remove the leader's in-memory cron entry. Re-check
+	// the persisted status at dispatch time so a task disabled through any
+	// node is skipped at the next dispatch-time check.
+	taskFunc = guardScheduledJob(taskModel.Id, taskFunc)
 
 	cronName := strconv.Itoa(taskModel.Id)
 	err := utils.PanicToError(func() {
@@ -922,6 +929,28 @@ func updateTaskLog(taskLogId int64, taskResult TaskResult) (int64, error) {
 	})
 }
 
+// guardScheduledJob prevents stale cron entries from dispatching after a task
+// is disabled on another HA node. Manual runs intentionally use createJob
+// directly and keep their existing behavior. This is not an atomic claim with
+// Disable: work that has already passed this check is not cancelled.
+func guardScheduledJob(taskID int, job cron.FuncJob) cron.FuncJob {
+	return func() {
+		var current models.Task
+		err := models.Db.Select("status").First(&current, taskID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return
+		}
+		if err != nil {
+			logger.Warnf("Skipping scheduled task dispatch#ID-%d#failed to read status: %v", taskID, err)
+			return
+		}
+		if current.Status != models.Enabled {
+			return
+		}
+		job()
+	}
+}
+
 func createJob(taskModel models.Task) cron.FuncJob {
 	handler := createHandler(taskModel)
 	if handler == nil {
@@ -1083,6 +1112,9 @@ func matchNotifyKeyword(taskModel models.Task, output string) bool {
 		return false
 	}
 	useRegex := taskModel.NotifyKeywordRegex == 1
+	if taskModel.NotifyKeywordLineMode == 1 {
+		return matchNotifyKeywordByLine(taskModel, output, useRegex)
+	}
 	matched, err := matchOutputPattern(kw, useRegex, output)
 	if err != nil {
 		logger.Warnf("通知关键字正则编译失败#task-%d: %v", taskModel.Id, err)
@@ -1102,6 +1134,42 @@ func matchNotifyKeyword(taskModel models.Task, output string) bool {
 		return true
 	}
 	return !excluded
+}
+
+// matchNotifyKeywordByLine scans without splitting/copying the (up to 1 MiB) output.
+// Regexes are compiled once per notification, not once per line.
+func matchNotifyKeywordByLine(task models.Task, output string, useRegex bool) bool {
+	match := func(line string) bool { return strings.Contains(line, task.NotifyKeyword) }
+	exclude := func(line string) bool { return strings.Contains(line, task.NotifyKeywordExclude) }
+	if useRegex {
+		keyword, err := regexp.Compile(task.NotifyKeyword)
+		if err != nil {
+			logger.Warnf("通知关键字正则编译失败#task-%d: %v", task.Id, err)
+			return false
+		}
+		match = keyword.MatchString
+		if task.NotifyKeywordExclude != "" {
+			excluded, err := regexp.Compile(task.NotifyKeywordExclude)
+			if err != nil {
+				// Preserve fail-open behavior of the whole-output matcher.
+				logger.Warnf("通知排除关键字正则编译失败#task-%d: %v", task.Id, err)
+				exclude = func(string) bool { return false }
+			} else {
+				exclude = excluded.MatchString
+			}
+		}
+	}
+	for {
+		line, rest, more := strings.Cut(output, "\n")
+		line = strings.TrimSuffix(line, "\r")
+		if match(line) && (task.NotifyKeywordExclude == "" || !exclude(line)) {
+			return true
+		}
+		if !more {
+			return false
+		}
+		output = rest
+	}
 }
 
 func SendNotification(taskModel models.Task, taskResult TaskResult) {
@@ -1130,6 +1198,13 @@ func SendNotification(taskModel models.Task, taskResult TaskResult) {
 		statusName = "Failed"
 	}
 
+	statusText := statusName
+	if failed && taskModel.NotifyFailureText != "" {
+		statusText = taskModel.NotifyFailureText
+	} else if !failed && taskModel.NotifySuccessText != "" {
+		statusText = taskModel.NotifySuccessText
+	}
+
 	output := taskResult.Result
 	// 失败 + 开启诊断时,尽力附带 AI 根因分析(不阻塞:本函数已在 goroutine 中调用)
 	if failed && taskModel.NotifyDiagnosis == 1 {
@@ -1145,6 +1220,7 @@ func SendNotification(taskModel models.Task, taskResult TaskResult) {
 		"name":             taskModel.Name,
 		"output":           output,
 		"status":           statusName,
+		"status_text":      statusText,
 		"task_id":          taskModel.Id,
 		"remark":           taskModel.Remark,
 	}
